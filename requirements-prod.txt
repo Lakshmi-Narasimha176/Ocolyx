@@ -1,0 +1,9 @@
+# Production requirements for Ocolyx
+opencv-python>=4.6.0
+numpy>=1.24
+scipy>=1.11
+imutils>=0.5.4
+dlib>=19.22.0
+pillow>=10.0.0
+customtkinter>=5.2.2
+pystray>=0.20.0
