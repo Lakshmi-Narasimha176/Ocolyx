@@ -16,6 +16,8 @@ import imutils
 import numpy as np
 from scipy.spatial import distance as dist
 
+from .utils.runtime_paths import dlib_shape_predictor_path
+
 
 BlinkEventCallback = Callable[["BlinkEvent"], None]
 StatusCallback = Callable[[str], None]
@@ -398,7 +400,7 @@ class BlinkDetector:
         process_fps: float = 6.0,
     ) -> None:
         self.logger = logger or logging.getLogger("ocolyx.blink_detector")
-        self.predictor_path = predictor_path or Path(__file__).resolve().parents[2] / "assets" / "models" / "shape_predictor_68_face_landmarks.dat"
+        self.predictor_path = predictor_path or dlib_shape_predictor_path()
         self.ear_threshold = ear_threshold
         self.consecutive_frames = consecutive_frames
         self.window_seconds = window_seconds

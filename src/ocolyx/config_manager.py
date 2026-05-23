@@ -152,7 +152,18 @@ class ConfigManager:
         return backup_path
 
     def _create_default_config(self) -> None:
-        default_settings = self._validate_settings(DEFAULT_SETTINGS.copy())
+        default_settings = DEFAULT_SETTINGS.copy()
+        if self.default_config_path.exists() and self.default_config_path != self.config_path:
+            try:
+                with self.default_config_path.open("r", encoding="utf-8") as handle:
+                    loaded_defaults = json.load(handle)
+                if isinstance(loaded_defaults, dict):
+                    default_settings = loaded_defaults
+            except (JSONDecodeError, OSError) as exc:
+                if self.logger:
+                    self.logger.warning("Unable to load bundled default config %s: %s", self.default_config_path, exc)
+
+        default_settings = self._validate_settings(default_settings)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         with self.config_path.open("w", encoding="utf-8") as handle:
             json.dump(default_settings, handle, indent=2)

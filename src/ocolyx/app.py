@@ -22,6 +22,7 @@ from .services.background_service import BackgroundService
 from .tray import TrayManager
 from .ui import OcolyxDashboard
 from .utils.asset_loader import resolve_icon_paths
+from .utils.runtime_paths import bundled_config_path, config_path, log_path, resource_root
 
 
 APP_EVENT_BLINK_DETECTED = "app.blink_detected"
@@ -45,13 +46,17 @@ class ApplicationController:
         background_service: Optional[BackgroundService] = None,
         blink_analyzer: Optional[BlinkRateAnalyzer] = None,
     ) -> None:
-        self.root_dir = root_dir or Path(__file__).resolve().parents[2]
-        self.config_manager = config_manager or ConfigManager(self.root_dir / "config" / "default_config.json", logger=logger)
+        self.root_dir = root_dir or resource_root()
+        self.config_manager = config_manager or ConfigManager(
+            config_path(),
+            default_config_path=bundled_config_path(),
+            logger=logger,
+        )
         log_level = self.config_manager.get("log_level", "INFO")
         log_when = self.config_manager.get("log_when", "midnight")
         log_backup_days = self.config_manager.get("log_backup_days", 30)
         self.logger = logger or setup_logger(
-            self.root_dir / "logs" / "ocolyx.log",
+            log_path(),
             log_level=log_level,
             when=log_when,
             backup_count=log_backup_days,

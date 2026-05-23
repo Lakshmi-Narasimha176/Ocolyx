@@ -1,6 +1,5 @@
 """Dashboard controller for Ocolyx."""
 
-from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, Callable
 
@@ -8,6 +7,7 @@ from pystray import Icon, MenuItem, Menu
 
 from .dashboard import DashboardView
 from ..utils.asset_loader import load_tray_icon, resolve_icon_paths
+from ..utils.runtime_paths import resource_root
 
 
 class DashboardController:
@@ -30,7 +30,7 @@ class DashboardController:
         self.get_status = get_status
         self.get_session_log = get_session_log
         self.on_settings_change = on_settings_change
-        self.root_dir = Path(__file__).resolve().parents[3]
+        self.root_dir = resource_root()
         self.window_icon_path, self.logo_path = resolve_icon_paths(self.root_dir)
         self.tray_icon_path = self.window_icon_path or self.logo_path
         self.lock = Lock()

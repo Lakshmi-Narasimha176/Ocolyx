@@ -12,6 +12,7 @@ build/
 .eggs/
 *.manifest
 *.spec
+!Ocolyx.spec
 
 # Virtual environments
 venv/
@@ -22,6 +23,7 @@ env/
 # PyInstaller
 *.manifest
 *.spec
+!Ocolyx.spec
 
 # IDEs
 .vscode/
