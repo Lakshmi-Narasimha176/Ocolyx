@@ -35,6 +35,7 @@ foreach ($relativePath in $requiredPaths) {
 }
 
 $pythonCandidates = @(
+    (Join-Path $Root ".venv\Scripts\python.exe"),
     (Join-Path $Root "venv\Scripts\python.exe"),
     "python"
 )
@@ -92,8 +93,6 @@ if (-not $NoClean) {
     $pyinstallerArgs += "--clean"
 }
 $pyinstallerArgs += "--noconfirm"
-$pyinstallerArgs += "--icon"
-$pyinstallerArgs += (Resolve-Path $IconPath).Path
 $pyinstallerArgs += $SpecPath
 
 & $Python -m PyInstaller @pyinstallerArgs
