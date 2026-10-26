@@ -38,6 +38,9 @@ class DashboardController:
         self.session_seconds = 0
         self.tray_icon: Icon | None = None
         self.icon_thread: Thread | None = None
+        self._is_shutting_down = False
+        self._status_after_id: str | None = None
+        self._session_after_id: str | None = None
 
         self.view = DashboardView(
             config_manager.settings,
@@ -51,10 +54,12 @@ class DashboardController:
         )
 
         self.view.safe_update(self.update_initial_status)
-        self.view.after(1000, self._session_tick)
-        self.view.after(500, self._status_tick)
+        self._session_after_id = self.view.schedule_after(1000, self._session_tick)
+        self._status_after_id = self.view.schedule_after(500, self._status_tick)
 
     def update_initial_status(self) -> None:
+        if not self._view_alive():
+            return
         self.view.set_webcam_status("Ready")
         self.view.set_monitor_status("Idle")
         self.view.set_alert_status("No active alerts")
@@ -66,6 +71,8 @@ class DashboardController:
         self.view.mainloop()
 
     def show_window(self) -> None:
+        if not self._view_alive():
+            return
         try:
             if self.view.state() != "normal":
                 self.view.deiconify()
@@ -76,6 +83,8 @@ class DashboardController:
             self.logger.warning("Failed to restore dashboard window: %s", exc)
 
     def start_monitoring(self) -> None:
+        if self._is_shutting_down:
+            return
         with self.lock:
             if self.monitoring:
                 return
@@ -102,23 +111,30 @@ class DashboardController:
                 callback()
             except Exception as exc:
                 self.logger.exception("Failed to %s from dashboard: %s", action_name, exc)
-                self.view.safe_update(self.view.set_alert_status, f"Failed to {action_name}")
+                if self._view_alive():
+                    self.view.safe_update(self.view.set_alert_status, f"Failed to {action_name}")
 
         Thread(target=worker, daemon=True).start()
 
     def set_monitoring_active(self) -> None:
         with self.lock:
             self.monitoring = True
+        if not self._view_alive():
+            return
         self.view.safe_update(self.view.set_monitor_status, "Active")
         self.view.safe_update(self.view.set_alert_status, "Monitoring enabled")
 
     def set_monitoring_inactive(self) -> None:
         with self.lock:
             self.monitoring = False
+        if not self._view_alive():
+            return
         self.view.safe_update(self.view.set_monitor_status, "Stopped")
         self.view.safe_update(self.view.set_alert_status, "Monitoring paused")
 
     def update_live_status(self, status: dict[str, Any]) -> None:
+        if not self._view_alive():
+            return
         blink_rate = float(status.get("blink_rate", 0.0) or 0.0)
         blink_count = int(status.get("blink_count", 0) or 0)
         webcam_connected = bool(status.get("webcam_connected", False))
@@ -127,9 +143,14 @@ class DashboardController:
         self.view.safe_update(self.view.set_alert_status, f"Session blinks: {blink_count}")
 
     def update_session_log(self, entries: list[dict[str, Any]]) -> None:
+        if not self._view_alive():
+            return
         self.view.safe_update(self.view.set_session_log_entries, entries)
 
     def update_settings(self, updates: dict[str, Any]) -> None:
+        if self._is_shutting_down:
+            return
+
         def worker() -> None:
             try:
                 if self.on_settings_change:
@@ -137,19 +158,24 @@ class DashboardController:
                 else:
                     self.config_manager.save(updates)
                     settings = self.config_manager.settings
-                self.view.safe_update(self.view.apply_settings_snapshot, settings)
-                self.view.safe_update(self.view.show_settings_success)
+                if self._view_alive():
+                    self.view.safe_update(self.view.apply_settings_snapshot, settings)
+                    self.view.safe_update(self.view.show_settings_success)
             except Exception as exc:
                 self.logger.warning("Settings update failed: %s", exc)
-                self.view.safe_update(self.view.set_settings_error, str(exc))
+                if self._view_alive():
+                    self.view.safe_update(self.view.set_settings_error, str(exc))
 
         Thread(target=worker, daemon=True).start()
 
     def update_settings_snapshot(self, settings: dict[str, Any]) -> None:
+        if not self._view_alive():
+            return
         self.view.safe_update(self.view.apply_settings_snapshot, settings)
 
     def _status_tick(self) -> None:
-        if not self.view.winfo_exists():
+        self._status_after_id = None
+        if self._is_shutting_down or not self._view_alive():
             return
 
         if self.get_status:
@@ -164,10 +190,11 @@ class DashboardController:
             except Exception as exc:
                 self.logger.warning("Failed to refresh session log: %s", exc)
 
-        self.view.after(500, self._status_tick)
+        self._status_after_id = self.view.schedule_after(500, self._status_tick)
 
     def _session_tick(self) -> None:
-        if not self.view.winfo_exists():
+        self._session_after_id = None
+        if self._is_shutting_down or not self._view_alive():
             return
 
         with self.lock:
@@ -175,9 +202,11 @@ class DashboardController:
                 self.session_seconds += 1
                 self.view.safe_update(self.view.set_session_timer, self._format_duration(self.session_seconds))
 
-        self.view.after(1000, self._session_tick)
+        self._session_after_id = self.view.schedule_after(1000, self._session_tick)
 
     def minimize_to_tray(self) -> None:
+        if self._is_shutting_down or not self._view_alive():
+            return
         self.logger.info("Minimizing application to tray")
         self.view.withdraw()
         if self.tray_icon is None:
@@ -206,12 +235,44 @@ class DashboardController:
         self.logger.info("Restoring application from tray")
         icon.stop()
         self.tray_icon = None
-        self.view.safe_update(self.show_window)
+        if self._view_alive():
+            self.view.safe_update(self.show_window)
 
     def _on_quit(self, icon: Icon, item: Any) -> None:
         self.logger.info("Quit requested from tray")
-        icon.stop()
-        self.view.safe_update(self.view.destroy)
+        try:
+            icon.stop()
+        finally:
+            self.tray_icon = None
+        if self._view_alive():
+            self.view.safe_update(self.shutdown)
+
+    def shutdown(self) -> None:
+        if self._is_shutting_down:
+            return
+        self._is_shutting_down = True
+        with self.lock:
+            self.monitoring = False
+
+        if self._status_after_id is not None:
+            self.view.cancel_after(self._status_after_id)
+            self._status_after_id = None
+        if self._session_after_id is not None:
+            self.view.cancel_after(self._session_after_id)
+            self._session_after_id = None
+
+        if self.tray_icon is not None:
+            try:
+                self.tray_icon.stop()
+            except Exception as exc:
+                self.logger.warning("Failed to stop tray icon during dashboard shutdown: %s", exc)
+            self.tray_icon = None
+
+        if self._view_alive():
+            self.view.destroy()
+
+    def _view_alive(self) -> bool:
+        return hasattr(self, "view") and self.view.is_alive()
 
     @staticmethod
     def _format_duration(seconds: int) -> str:

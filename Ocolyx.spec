@@ -9,7 +9,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 ROOT = Path(SPECPATH).resolve()
 ASSETS_DIR = ROOT / "assets"
 CONFIG_DIR = ROOT / "config"
-ICON_PATH = ASSETS_DIR / "icons" / "Ocolyx.ico"
+ICON_PATH = (ASSETS_DIR / "icons" / "ocolyx.ico").resolve()
+APPLICATION_ICON = str(ICON_PATH)
+RUNTIME_HOOK = str((ROOT / "tools" / "pyi_rth_ocolyx.py").resolve())
 DLIB_MODEL_PATH = ASSETS_DIR / "models" / "shape_predictor_68_face_landmarks.dat"
 
 required_paths = (
@@ -17,10 +19,17 @@ required_paths = (
     CONFIG_DIR / "default_config.json",
     ICON_PATH,
     DLIB_MODEL_PATH,
+    Path(RUNTIME_HOOK),
 )
 missing = [str(path) for path in required_paths if not path.exists()]
 if missing:
     raise FileNotFoundError("Missing required build resources: " + ", ".join(missing))
+
+if ICON_PATH.suffix.lower() != ".ico":
+    raise ValueError(f"Application icon must be a .ico file: {ICON_PATH}")
+
+if ICON_PATH.stat().st_size == 0:
+    raise ValueError(f"Application icon is empty: {ICON_PATH}")
 
 datas = [
     (str(ASSETS_DIR), "assets"),
@@ -53,7 +62,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[RUNTIME_HOOK],
     excludes=excludes,
     noarchive=False,
     optimize=1,
@@ -80,5 +89,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(ICON_PATH),
+    icon=APPLICATION_ICON,
 )

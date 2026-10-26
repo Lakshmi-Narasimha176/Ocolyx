@@ -153,8 +153,18 @@ class SmartAlertManager:
 
         if not self.ui_root:
             return
+        try:
+            if not self.ui_root.winfo_exists():
+                return
+        except Exception:
+            return
 
         def _open_dialog() -> None:
+            try:
+                if not self.ui_root or not self.ui_root.winfo_exists():
+                    return
+            except Exception:
+                return
             popup = ctk.CTkToplevel(self.ui_root)
             popup.title(title)
             popup.geometry("420x170")
@@ -173,7 +183,15 @@ class SmartAlertManager:
             close_btn = ctk.CTkButton(frame, text="Dismiss", fg_color="#2b6cb0", hover_color="#235185", command=popup.destroy)
             close_btn.pack(anchor="e")
 
-        self.ui_root.after(0, _open_dialog)
+        try:
+            if hasattr(self.ui_root, "safe_update"):
+                self.ui_root.safe_update(_open_dialog)
+            elif hasattr(self.ui_root, "schedule_after"):
+                self.ui_root.schedule_after(0, _open_dialog)
+            else:
+                self.ui_root.after(0, _open_dialog)
+        except Exception as exc:
+            self.logger.debug("Unable to schedule alert dialog: %s", exc)
 
     def get_history(self, limit: Optional[int] = None) -> List[AlertHistoryEntry]:
         with self._lock:

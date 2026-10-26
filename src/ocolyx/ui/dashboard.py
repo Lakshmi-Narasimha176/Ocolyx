@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import queue
+import sys
 import threading
 from typing import Any, Callable
 import tkinter as tk
@@ -9,7 +10,7 @@ import tkinter as tk
 import customtkinter as ctk
 
 from .theme import ThemeManager
-from ..utils.asset_loader import load_tk_icon
+from ..utils.asset_loader import apply_tk_window_icon, apply_windows_app_user_model_id, load_tk_icon
 
 
 class DashboardView(ctk.CTk):
@@ -24,6 +25,7 @@ class DashboardView(ctk.CTk):
         on_settings_change: Callable[[dict[str, Any]], None],
         logger: Any,
     ) -> None:
+        apply_windows_app_user_model_id(logger)
         super().__init__()
         self.config = config
         self.logo_path = logo_path
@@ -38,6 +40,9 @@ class DashboardView(ctk.CTk):
         self._ui_queue: queue.Queue[tuple[Callable[..., None], tuple[Any, ...], dict[str, Any]]] = queue.Queue()
         self._main_thread_id = threading.get_ident()
         self._max_ui_callbacks_per_tick = 50
+        self._is_destroying = False
+        self._scheduled_after_ids: set[str] = set()
+        self._ui_queue_after_id: str | None = None
         self._current_view = "dashboard"
         self._session_log_entries: list[dict[str, Any]] = []
         self._setting_vars: dict[str, Any] = {}
@@ -50,17 +55,94 @@ class DashboardView(ctk.CTk):
         self.theme = ThemeManager(config.get("theme", {}), logger=logger)
         self.theme.apply()
 
-        self.title("Ocolyx • Cyber Blue")
+        self.title("Ocolyx")
         self.geometry(f"{config.get('window', {}).get('width', 960)}x{config.get('window', {}).get('height', 620)}")
         self.minsize(config.get('window', {}).get('min_width', 800), config.get('window', {}).get('min_height', 540))
         self.configure(fg_color=self.theme.bg_main)
 
         self.protocol("WM_DELETE_WINDOW", self._minimize_to_tray)
         self._apply_window_icon()
+        if sys.platform == "win32":
+            self.after_idle(self._apply_window_icon)
         self._create_variables()
         self._configure_grid()
         self._build_interface()
-        self.after(0, self._dispatch_ui_queue)
+        self._ui_queue_after_id = self.schedule_after(0, self._dispatch_ui_queue)
+
+    def widget_exists(self, widget: Any | None = None) -> bool:
+        widget = widget or self
+        try:
+            return bool(widget.winfo_exists())
+        except Exception:
+            return False
+
+    def is_alive(self) -> bool:
+        return not self._is_destroying and self.widget_exists()
+
+    def schedule_after(self, delay_ms: int, callback: Callable[..., None], *args: Any) -> str | None:
+        if self._is_destroying or not self.widget_exists():
+            return None
+
+        after_id: str | None = None
+
+        def guarded_callback() -> None:
+            if after_id is not None:
+                self._scheduled_after_ids.discard(after_id)
+            if self._is_destroying or not self.widget_exists():
+                return
+            try:
+                callback(*args)
+            except tk.TclError as exc:
+                if "invalid command name" not in str(exc):
+                    self.logger.exception("Scheduled UI callback failed: %s", exc)
+            except Exception as exc:
+                self.logger.exception("Scheduled UI callback failed: %s", exc)
+
+        try:
+            after_id = self.after(delay_ms, guarded_callback)
+            self._scheduled_after_ids.add(after_id)
+            return after_id
+        except tk.TclError:
+            return None
+
+    def cancel_after(self, after_id: str | None) -> None:
+        if after_id is None:
+            return
+        self._scheduled_after_ids.discard(after_id)
+        try:
+            if self.widget_exists():
+                self.after_cancel(after_id)
+        except tk.TclError:
+            pass
+
+    def cancel_pending_callbacks(self) -> None:
+        for after_id in list(self._scheduled_after_ids):
+            self.cancel_after(after_id)
+        self._scheduled_after_ids.clear()
+        try:
+            if self.widget_exists():
+                after_ids = self.tk.call("after", "info")
+                if isinstance(after_ids, str):
+                    after_ids = after_ids.split()
+                for after_id in after_ids:
+                    try:
+                        self.after_cancel(after_id)
+                    except tk.TclError:
+                        pass
+        except tk.TclError:
+            pass
+        self._ui_queue_after_id = None
+        self._settings_feedback_after_id = None
+
+        while True:
+            try:
+                self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def shutdown(self) -> None:
+        self._is_destroying = True
+        self.cancel_pending_callbacks()
 
     def _create_variables(self) -> None:
         self.blink_rate_value = ctk.StringVar(value="0.0 bpm")
@@ -74,22 +156,14 @@ class DashboardView(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
     def _apply_window_icon(self) -> None:
-        if self.window_icon_path is not None and self.window_icon_path.exists() and self.window_icon_path.suffix.lower() == ".ico":
-            try:
-                self.iconbitmap(str(self.window_icon_path))
-                return
-            except Exception as exc:
-                self.logger.warning("Failed to set window icon from %s: %s", self.window_icon_path, exc)
-
-        if self.logo_path is not None and self.logo_path.exists():
-            photo = load_tk_icon(self.logo_path, size=(64, 64), logger=self.logger)
-            if photo is not None:
-                try:
-                    self.iconphoto(True, photo)
-                    self._window_icon_photo = photo
-                    return
-                except Exception as exc:
-                    self.logger.warning("Failed to set window icon photo from %s: %s", self.logo_path, exc)
+        _, photo = apply_tk_window_icon(
+            self,
+            self.window_icon_path,
+            self.logo_path,
+            logger=self.logger,
+        )
+        if photo is not None:
+            self._window_icon_photo = photo
 
     def _build_interface(self) -> None:
         self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=self.theme.bg_sidebar)
@@ -161,12 +235,22 @@ class DashboardView(ctk.CTk):
         self.show_dashboard_view()
 
     def _clear_body(self) -> None:
+        if not self.is_alive() or not self.widget_exists(getattr(self, "body_frame", None)):
+            return
         for child in self.body_frame.winfo_children():
-            child.destroy()
+            try:
+                if self.widget_exists(child):
+                    child.destroy()
+            except tk.TclError:
+                pass
 
     def show_dashboard_view(self) -> None:
+        if not self.is_alive():
+            return
         self._current_view = "dashboard"
         self._clear_body()
+        if not self.widget_exists(getattr(self, "header_title", None)):
+            return
         self.header_title.configure(text="Eye-strain defense dashboard")
         self.header_subtitle.configure(text="Live blink telemetry, session controls, and alert status.")
         self._set_nav_state("dashboard")
@@ -175,8 +259,12 @@ class DashboardView(ctk.CTk):
         self._build_settings_panel()
 
     def show_settings_view(self) -> None:
+        if not self.is_alive():
+            return
         self._current_view = "settings"
         self._clear_body()
+        if not self.widget_exists(getattr(self, "header_title", None)):
+            return
         self.header_title.configure(text="Settings")
         self.header_subtitle.configure(text="Monitoring thresholds, alert timing, and screen dimming.")
         self._set_nav_state("settings")
@@ -224,8 +312,12 @@ class DashboardView(ctk.CTk):
         self._settings_feedback_frame.grid_remove()
 
     def show_session_log_view(self) -> None:
+        if not self.is_alive():
+            return
         self._current_view = "session_log"
         self._clear_body()
+        if not self.widget_exists(getattr(self, "header_title", None)):
+            return
         self.header_title.configure(text="Session Log")
         self.header_subtitle.configure(text="Recent alert and blink-rate events from this session.")
         self._set_nav_state("session_log")
@@ -406,29 +498,39 @@ class DashboardView(ctk.CTk):
         value_label.grid(row=row, column=1, padx=(10, 20), pady=(10, 2), sticky="e")
 
     def _minimize_to_tray(self) -> None:
-        self.on_minimize()
+        if self.is_alive():
+            self.on_minimize()
 
     def set_blink_rate(self, value: str) -> None:
-        self.blink_rate_value.set(value)
+        if self.is_alive():
+            self.blink_rate_value.set(value)
 
     def set_webcam_status(self, value: str) -> None:
-        self.webcam_status_value.set(value)
+        if self.is_alive():
+            self.webcam_status_value.set(value)
 
     def set_monitor_status(self, value: str) -> None:
-        self.monitor_status_value.set(value)
+        if self.is_alive():
+            self.monitor_status_value.set(value)
 
     def set_alert_status(self, value: str) -> None:
-        self.alert_status_value.set(value)
+        if self.is_alive():
+            self.alert_status_value.set(value)
 
     def set_session_timer(self, value: str) -> None:
-        self.session_timer_value.set(value)
+        if self.is_alive():
+            self.session_timer_value.set(value)
 
     def set_session_log_entries(self, entries: list[dict[str, Any]]) -> None:
+        if not self.is_alive():
+            return
         self._session_log_entries = entries
         if self._current_view == "session_log":
             self.show_session_log_view()
 
     def apply_settings_snapshot(self, settings: dict[str, Any]) -> None:
+        if not self.is_alive():
+            return
         self.config = settings
         if self._current_view == "settings":
             for key, variable in self._setting_vars.items():
@@ -440,47 +542,50 @@ class DashboardView(ctk.CTk):
         self.set_settings_error("")
 
     def set_settings_error(self, message: str) -> None:
+        if not self.is_alive():
+            return
         if message:
             self.clear_settings_feedback()
         if self._settings_error_var is not None:
             self._settings_error_var.set(message)
 
     def show_settings_success(self, message: str = "Settings applied successfully") -> None:
+        if not self.is_alive():
+            return
         self._show_settings_feedback(message, self.theme.success, self.theme.accent, auto_hide_ms=2500)
 
     def clear_settings_feedback(self) -> None:
+        if self._is_destroying:
+            return
         if self._settings_feedback_after_id is not None:
-            try:
-                self.after_cancel(self._settings_feedback_after_id)
-            except Exception:
-                pass
+            self.cancel_after(self._settings_feedback_after_id)
             self._settings_feedback_after_id = None
         if self._settings_feedback_var is not None:
             self._settings_feedback_var.set("")
-        if self._settings_feedback_frame is not None and self._settings_feedback_frame.winfo_exists():
+        if self._settings_feedback_frame is not None and self.widget_exists(self._settings_feedback_frame):
             self._settings_feedback_frame.grid_remove()
 
     def _show_settings_feedback(self, message: str, text_color: str, border_color: str, auto_hide_ms: int) -> None:
+        if not self.is_alive():
+            return
         if self._settings_feedback_frame is None or self._settings_feedback_var is None:
             return
-        if not self._settings_feedback_frame.winfo_exists():
+        if not self.widget_exists(self._settings_feedback_frame):
             return
         if self._settings_feedback_after_id is not None:
-            try:
-                self.after_cancel(self._settings_feedback_after_id)
-            except Exception:
-                pass
+            self.cancel_after(self._settings_feedback_after_id)
             self._settings_feedback_after_id = None
 
         self._settings_feedback_var.set(message)
-        if self._settings_feedback_label is not None and self._settings_feedback_label.winfo_exists():
+        if self._settings_feedback_label is not None and self.widget_exists(self._settings_feedback_label):
             self._settings_feedback_label.configure(text_color=text_color)
         self._settings_feedback_frame.configure(border_color=border_color)
         self._settings_feedback_frame.grid()
-        self._settings_feedback_after_id = self.after(auto_hide_ms, self.clear_settings_feedback)
+        self._settings_feedback_after_id = self.schedule_after(auto_hide_ms, self.clear_settings_feedback)
 
     def _dispatch_ui_queue(self) -> None:
-        if not self.winfo_exists():
+        self._ui_queue_after_id = None
+        if not self.is_alive():
             return
 
         processed = 0
@@ -491,16 +596,37 @@ class DashboardView(ctk.CTk):
                 break
 
             try:
-                callback(*args, **kwargs)
+                if self.is_alive():
+                    callback(*args, **kwargs)
             except Exception as exc:
                 self.logger.exception("Queued UI callback failed: %s", exc)
             processed += 1
 
-        self.after(10, self._dispatch_ui_queue)
+        self._ui_queue_after_id = self.schedule_after(10, self._dispatch_ui_queue)
 
     def safe_update(self, callback: Callable[..., None], *args: Any, **kwargs: Any) -> None:
+        if self._is_destroying:
+            return
+
         if threading.get_ident() == self._main_thread_id:
-            callback(*args, **kwargs)
+            if not self.is_alive():
+                return
+            try:
+                callback(*args, **kwargs)
+            except tk.TclError as exc:
+                if "invalid command name" not in str(exc):
+                    self.logger.exception("Immediate UI callback failed: %s", exc)
             return
 
         self._ui_queue.put((callback, args, kwargs))
+
+    def destroy(self) -> None:
+        if self._is_destroying and not self.widget_exists():
+            return
+        self.shutdown()
+        try:
+            if self.widget_exists():
+                super().destroy()
+        except tk.TclError as exc:
+            if "invalid command name" not in str(exc):
+                raise

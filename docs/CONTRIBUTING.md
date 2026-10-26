@@ -21,6 +21,22 @@ Coding standards
 - Keep UI logic separated from business logic.
 - Write tests for new features when possible.
 
+Testing
+
+Run the test suite from the repository root:
+
+```powershell
+pytest
+```
+
+On some Windows systems, pytest may fail before tests run because the default
+temporary directory is not writable. If you see Windows temp directory
+permission errors, run pytest with a workspace-local temp directory:
+
+```powershell
+pytest --basetemp .\test-tmp
+```
+
 Submitting a PR
 
 - Ensure tests pass locally.

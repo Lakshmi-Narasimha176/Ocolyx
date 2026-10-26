@@ -50,7 +50,51 @@ class ScreenDimmer:
         self._overlays: List[Toplevel] = []
         self._active = False
         self._pulse_after_id: str | None = None
+        self._after_ids: set[str] = set()
+        self._is_shutting_down = False
         self._monitor_rects = self._discover_monitors()
+
+    def _root_exists(self) -> bool:
+        try:
+            return bool(self.root.winfo_exists())
+        except Exception:
+            return False
+
+    def _schedule_after(self, delay_ms: int, callback) -> str | None:
+        if self._is_shutting_down or not self._root_exists():
+            return None
+
+        after_id: str | None = None
+
+        def guarded_callback() -> None:
+            if after_id is not None:
+                self._after_ids.discard(after_id)
+            if self._is_shutting_down or not self._root_exists():
+                return
+            callback()
+
+        try:
+            if hasattr(self.root, "schedule_after"):
+                after_id = self.root.schedule_after(delay_ms, guarded_callback)
+            else:
+                after_id = self.root.after(delay_ms, guarded_callback)
+            if after_id is not None:
+                self._after_ids.add(after_id)
+            return after_id
+        except Exception:
+            return None
+
+    def _cancel_after(self, after_id: str | None) -> None:
+        if after_id is None:
+            return
+        self._after_ids.discard(after_id)
+        try:
+            if hasattr(self.root, "cancel_after"):
+                self.root.cancel_after(after_id)
+            elif self._root_exists():
+                self.root.after_cancel(after_id)
+        except Exception:
+            pass
 
     def _discover_monitors(self) -> List[MonitorRect]:
         if platform.system() != "Windows":
@@ -88,8 +132,10 @@ class ScreenDimmer:
         return monitors
 
     def show(self, fade_duration_ms: Optional[int] = None, opacity: Optional[float] = None) -> None:
+        if self._is_shutting_down or not self._root_exists():
+            return
         if threading.current_thread() is not threading.main_thread():
-            self.root.after(0, lambda: self.show(fade_duration_ms=fade_duration_ms, opacity=opacity))
+            self._schedule_after(0, lambda: self.show(fade_duration_ms=fade_duration_ms, opacity=opacity))
             return
 
         with self._lock:
@@ -109,8 +155,10 @@ class ScreenDimmer:
         fade_duration_ms: Optional[int] = None,
         opacity: Optional[float] = None,
     ) -> None:
+        if self._is_shutting_down or not self._root_exists():
+            return
         if threading.current_thread() is not threading.main_thread():
-            self.root.after(0, lambda: self.pulse(duration_ms=duration_ms, fade_duration_ms=fade_duration_ms, opacity=opacity))
+            self._schedule_after(0, lambda: self.pulse(duration_ms=duration_ms, fade_duration_ms=fade_duration_ms, opacity=opacity))
             return
 
         with self._lock:
@@ -125,8 +173,10 @@ class ScreenDimmer:
             self._fade_in(fade_ms, on_complete=lambda: self._schedule_pulse_hide(hold_ms, fade_ms))
 
     def hide(self, fade_duration_ms: Optional[int] = None) -> None:
+        if self._is_shutting_down or not self._root_exists():
+            return
         if threading.current_thread() is not threading.main_thread():
-            self.root.after(0, lambda: self.hide(fade_duration_ms=fade_duration_ms))
+            self._schedule_after(0, lambda: self.hide(fade_duration_ms=fade_duration_ms))
             return
 
         with self._lock:
@@ -137,9 +187,11 @@ class ScreenDimmer:
             self._fade_out(fade_duration_ms)
 
     def _schedule_pulse_hide(self, hold_ms: int, fade_duration_ms: int) -> None:
-        self._pulse_after_id = self.root.after(hold_ms, lambda: self.hide(fade_duration_ms=fade_duration_ms))
+        self._pulse_after_id = self._schedule_after(hold_ms, lambda: self.hide(fade_duration_ms=fade_duration_ms))
 
     def _create_overlays(self) -> None:
+        if self._is_shutting_down or not self._root_exists():
+            return
         self._destroy_overlays(reset_active=False)
         for monitor in self._monitor_rects:
             overlay = Toplevel(self.root)
@@ -175,14 +227,14 @@ class ScreenDimmer:
 
     def _destroy_overlays(self, reset_active: bool = True) -> None:
         if self._pulse_after_id is not None:
-            try:
-                self.root.after_cancel(self._pulse_after_id)
-            except Exception:
-                pass
+            self._cancel_after(self._pulse_after_id)
             self._pulse_after_id = None
+        for after_id in list(self._after_ids):
+            self._cancel_after(after_id)
         for overlay in self._overlays:
             try:
-                overlay.destroy()
+                if overlay.winfo_exists():
+                    overlay.destroy()
             except Exception:
                 pass
         self._overlays.clear()
@@ -190,7 +242,7 @@ class ScreenDimmer:
             self._active = False
 
     def _fade_in(self, fade_duration_ms: int, on_complete=None) -> None:
-        if not self._overlays:
+        if self._is_shutting_down or not self._overlays:
             return
 
         step_ms = max(1, fade_duration_ms // self.fade_steps)
@@ -199,6 +251,8 @@ class ScreenDimmer:
 
         def step() -> None:
             nonlocal current_alpha
+            if self._is_shutting_down or not self._root_exists():
+                return
             current_alpha += alpha_step
             alpha = min(current_alpha, self.opacity)
             for overlay in self._overlays:
@@ -207,13 +261,16 @@ class ScreenDimmer:
                 except Exception:
                     pass
             if alpha < self.opacity and self._active:
-                self.root.after(step_ms, step)
+                self._schedule_after(step_ms, step)
             elif on_complete:
                 on_complete()
 
         step()
 
     def _fade_out(self, fade_duration_ms: int) -> None:
+        if self._is_shutting_down:
+            self._destroy_overlays()
+            return
         if not self._overlays:
             self._destroy_overlays()
             return
@@ -224,6 +281,8 @@ class ScreenDimmer:
 
         def step() -> None:
             nonlocal current_alpha
+            if self._is_shutting_down or not self._root_exists():
+                return
             current_alpha -= alpha_step
             alpha = max(current_alpha, 0.0)
             for overlay in self._overlays:
@@ -232,7 +291,7 @@ class ScreenDimmer:
                 except Exception:
                     pass
             if alpha > 0.0:
-                self.root.after(step_ms, step)
+                self._schedule_after(step_ms, step)
             else:
                 self._destroy_overlays()
 
@@ -247,3 +306,8 @@ class ScreenDimmer:
             self.hide(fade_duration_ms=fade_duration_ms)
         else:
             self.show(fade_duration_ms=fade_duration_ms, opacity=opacity)
+
+    def shutdown(self) -> None:
+        with self._lock:
+            self._is_shutting_down = True
+            self._destroy_overlays()

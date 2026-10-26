@@ -21,7 +21,7 @@ from .overlay import ScreenDimmer
 from .services.background_service import BackgroundService
 from .tray import TrayManager
 from .ui import OcolyxDashboard
-from .utils.asset_loader import resolve_icon_paths
+from .utils.asset_loader import apply_windows_app_user_model_id, resolve_icon_paths
 from .utils.runtime_paths import bundled_config_path, config_path, log_path, resource_root
 
 
@@ -47,6 +47,7 @@ class ApplicationController:
         blink_analyzer: Optional[BlinkRateAnalyzer] = None,
     ) -> None:
         self.root_dir = root_dir or resource_root()
+        apply_windows_app_user_model_id(logger)
         self.config_manager = config_manager or ConfigManager(
             config_path(),
             default_config_path=bundled_config_path(),
@@ -67,6 +68,7 @@ class ApplicationController:
         self.screen_dimmer: Optional[ScreenDimmer] = None
         self._low_blink_since = 0.0
         self._last_dim_time = 0.0
+        self._health_after_id: str | None = None
         # Instantiate the blink detector and handle missing model or initialization errors.
         try:
             self.blink_detector = (
@@ -199,6 +201,8 @@ class ApplicationController:
             self.shutdown()
 
     def restore(self) -> None:
+        if self._is_shutting_down:
+            return
         self.logger.info("Restoring application from tray")
         if hasattr(self.ui, "view") and hasattr(self.ui.view, "safe_update"):
             self.ui.view.safe_update(self.ui.show_window)
@@ -207,6 +211,8 @@ class ApplicationController:
             self.ui.view.deiconify()
 
     def _show_alert_dialog(self, title: str, message: str, severity: str) -> None:
+        if self._is_shutting_down:
+            return
         if not hasattr(self.ui, "view") or not hasattr(self.ui.view, "safe_update"):
             self.logger.warning("Alert dialog requested but no UI view is available")
             return
@@ -214,7 +220,9 @@ class ApplicationController:
         self.ui.view.safe_update(self._open_alert_dialog, title, message)
 
     def _open_alert_dialog(self, title: str, message: str) -> None:
-        if not hasattr(self.ui, "view"):
+        if self._is_shutting_down or not hasattr(self.ui, "view"):
+            return
+        if hasattr(self.ui.view, "is_alive") and not self.ui.view.is_alive():
             return
 
         popup = ctk.CTkToplevel(self.ui.view)
@@ -284,6 +292,8 @@ class ApplicationController:
         self._show_screen_dim()
 
     def _show_screen_dim(self) -> None:
+        if self._is_shutting_down:
+            return
         self._initialize_screen_dimmer()
         if self.screen_dimmer is None:
             return
@@ -292,7 +302,7 @@ class ApplicationController:
         opacity = float(settings.get("overlay_opacity", 0.35))
 
         def pulse() -> None:
-            if self.screen_dimmer is None:
+            if self._is_shutting_down or self.screen_dimmer is None:
                 return
             self.screen_dimmer.pulse(duration_ms=2500, opacity=opacity)
 
@@ -300,10 +310,16 @@ class ApplicationController:
             self.ui.view.safe_update(pulse)
 
     def _schedule_health_tick(self) -> None:
-        if hasattr(self.ui, "view") and hasattr(self.ui.view, "after"):
-            self.ui.view.after(1000, self._health_tick)
+        if self._is_shutting_down:
+            return
+        if hasattr(self.ui, "view"):
+            if hasattr(self.ui.view, "schedule_after"):
+                self._health_after_id = self.ui.view.schedule_after(1000, self._health_tick)
+            elif hasattr(self.ui.view, "after"):
+                self._health_after_id = self.ui.view.after(1000, self._health_tick)
 
     def _health_tick(self) -> None:
+        self._health_after_id = None
         if self._is_shutting_down:
             return
         try:
@@ -366,13 +382,32 @@ class ApplicationController:
         self._is_shutting_down = True
         self.logger.info("Shutting down Ocolyx application")
         self.event_bus.publish(APP_EVENT_SHUTDOWN)
+
+        if self._health_after_id is not None and hasattr(self.ui, "view"):
+            try:
+                if hasattr(self.ui.view, "cancel_after"):
+                    self.ui.view.cancel_after(self._health_after_id)
+                else:
+                    self.ui.view.after_cancel(self._health_after_id)
+            except Exception:
+                pass
+            self._health_after_id = None
+
+        if self.screen_dimmer is not None and hasattr(self.screen_dimmer, "shutdown"):
+            self.safe_execute(self.screen_dimmer.shutdown)
+
         self.safe_execute(self.tray.stop)
         self.safe_execute(self.blink_detector.stop)
         self.safe_execute(self.background_service.stop)
-        if hasattr(self.ui, "view") and hasattr(self.ui.view, "destroy"):
+        if hasattr(self.ui, "shutdown"):
+            self.safe_execute(self.ui.shutdown)
+        elif hasattr(self.ui, "view") and hasattr(self.ui.view, "destroy"):
             self.ui.view.destroy()
 
     def handle_exception(self, exc: Exception) -> None:
+        if self._is_shutting_down:
+            self.logger.debug("Ignoring exception during shutdown: %s", exc)
+            return
         self.logger.exception("Unhandled exception in Ocolyx application: %s", exc)
         self.event_bus.publish(APP_EVENT_EXCEPTION, exc)
 
@@ -381,6 +416,9 @@ class ApplicationController:
 
         Falls back to logging when a UI is not available.
         """
+        if self._is_shutting_down:
+            self.logger.error("%s: %s", title, message)
+            return
         try:
             if hasattr(self, "ui") and getattr(self.ui, "view", None) is not None:
                 # Schedule the messagebox on the main UI thread
@@ -410,6 +448,8 @@ class ApplicationController:
             self.handle_exception(exc)
 
     def _on_blink(self, blink_event: Any) -> None:
+        if self._is_shutting_down:
+            return
         try:
             metrics = self.blink_analyzer.record_blink(getattr(blink_event, "timestamp", None))
             self.event_bus.publish(APP_EVENT_BLINK_DETECTED, blink_event, metrics)
@@ -426,9 +466,13 @@ class ApplicationController:
         self.logger.info("Blink detector reconnected: %s", message)
 
     def _on_error(self, exc: Exception) -> None:
+        if self._is_shutting_down:
+            return
         self.handle_exception(exc)
 
     def _handle_blink_event(self, blink_event: Any, metrics: Any) -> None:
+        if self._is_shutting_down:
+            return
         self.logger.debug("Event bus received blink event. Current BPM: %.2f", metrics.blinks_per_minute)
         if hasattr(self.ui, "update_live_status"):
             self.ui.update_live_status(self.get_status())
@@ -437,6 +481,8 @@ class ApplicationController:
         self.logger.debug("Event bus received alert event: %s %s", args, kwargs)
 
     def _handle_exception(self, exc: Exception) -> None:
+        if self._is_shutting_down:
+            return
         # Log and present a friendly dialog to the user when exceptions bubble up
         self.logger.error("Application exception event: %s", exc)
         try:

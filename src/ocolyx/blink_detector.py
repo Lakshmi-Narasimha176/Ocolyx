@@ -14,7 +14,6 @@ import cv2
 import dlib
 import imutils
 import numpy as np
-from scipy.spatial import distance as dist
 
 from .utils.runtime_paths import dlib_shape_predictor_path
 
@@ -37,13 +36,61 @@ LEFT_EYE_INDICES = list(range(42, 48))
 RIGHT_EYE_INDICES = list(range(36, 42))
 
 
+def _euclidean_distance(point_a: np.ndarray, point_b: np.ndarray) -> float:
+    """Euclidean distance between two 2D landmark points."""
+    return float(np.linalg.norm(point_a - point_b))
+
+
 def eye_aspect_ratio(eye_points: np.ndarray) -> float:
-    vertical_1 = dist.euclidean(eye_points[1], eye_points[5])
-    vertical_2 = dist.euclidean(eye_points[2], eye_points[4])
-    horizontal = dist.euclidean(eye_points[0], eye_points[3])
+    vertical_1 = _euclidean_distance(eye_points[1], eye_points[5])
+    vertical_2 = _euclidean_distance(eye_points[2], eye_points[4])
+    horizontal = _euclidean_distance(eye_points[0], eye_points[3])
     if horizontal == 0:
         return 0.0
     return (vertical_1 + vertical_2) / (2.0 * horizontal)
+
+
+def _estimate_brightness(frame: np.ndarray) -> float:
+    """Estimate frame brightness (0-1, where 1 is brightest)."""
+    if frame is None or frame.size == 0:
+        return 0.5
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+    return float(np.mean(gray) / 255.0)
+
+
+def _preprocess_frame_for_detection(frame: np.ndarray, brightness: float) -> np.ndarray:
+    """Apply adaptive preprocessing for robust detection in varying light conditions.
+    
+    Args:
+        frame: Input BGR frame
+        brightness: Estimated brightness (0-1 scale)
+    
+    Returns:
+        Preprocessed grayscale frame optimized for face/eye detection
+    """
+    # Convert to grayscale
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) for low-light enhancement
+    # CLAHE is superior to regular histogram equalization as it prevents over-amplification
+    # of noise in uniform regions
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    
+    # For very dark frames, apply additional contrast enhancement
+    if brightness < 0.25:
+        # Apply bilateral filtering to reduce noise while preserving edges
+        enhanced = cv2.bilateralFilter(enhanced, 9, 75, 75)
+        # Apply morphological opening to clean up noise
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        enhanced = cv2.morphologyEx(enhanced, cv2.MORPH_OPEN, kernel)
+        # Increase contrast further
+        enhanced = cv2.convertScaleAbs(enhanced, alpha=1.2, beta=10)
+    elif brightness < 0.4:
+        # For moderately dark frames, apply light bilateral filtering
+        enhanced = cv2.bilateralFilter(enhanced, 5, 50, 50)
+    
+    return enhanced
 
 
 class WebcamManager(threading.Thread):
@@ -427,6 +474,11 @@ class BlinkDetector:
         self._last_blink_time = 0.0
         self._blink_timestamps: Deque[float] = deque()
         self._current_fps = 0.0
+        
+        # Low-light detection and adaptation
+        self._current_brightness = 0.5
+        self._brightness_history: Deque[float] = deque(maxlen=10)
+        self._current_ear_threshold = self.ear_threshold
 
     def _load_detector(self) -> None:
         if not self.predictor_path.exists():
@@ -514,6 +566,9 @@ class BlinkDetector:
             self._eye_closed_frames = 0
             self.blink_count = 0
             self._blink_timestamps.clear()
+            self._current_brightness = 0.5
+            self._brightness_history.clear()
+            self._current_ear_threshold = self.ear_threshold
 
     def validate_monitoring_state(self) -> bool:
         with self._lifecycle_lock:
@@ -563,7 +618,27 @@ class BlinkDetector:
             time.sleep(0.015)
 
     def _process_frame(self, frame: np.ndarray) -> None:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Estimate frame brightness for adaptive processing
+        brightness = _estimate_brightness(frame)
+        
+        with self._state_lock:
+            self._brightness_history.append(brightness)
+            avg_brightness = float(np.mean(list(self._brightness_history)))
+            self._current_brightness = avg_brightness
+            
+            # Dynamically adjust EAR threshold based on lighting conditions
+            # In dark conditions, lower the threshold to be more sensitive to blinks
+            if avg_brightness < 0.25:
+                self._current_ear_threshold = self.ear_threshold * 0.85  # 15% more sensitive
+            elif avg_brightness < 0.4:
+                self._current_ear_threshold = self.ear_threshold * 0.92  # 8% more sensitive
+            else:
+                self._current_ear_threshold = self.ear_threshold
+        
+        # Apply adaptive preprocessing for robust detection in varying light
+        gray = _preprocess_frame_for_detection(frame, brightness)
+        
+        # Detect faces in preprocessed frame
         faces = self.face_detector(gray, 0)
         if not faces:
             with self._state_lock:
@@ -584,8 +659,9 @@ class BlinkDetector:
             self.current_ear = ear
             webcam_manager = self.webcam_manager
             self._current_fps = webcam_manager.fps if webcam_manager is not None else 0.0
+            current_threshold = self._current_ear_threshold
 
-        if ear < self.ear_threshold:
+        if ear < current_threshold:
             self._eye_closed_frames += 1
             return
 
@@ -654,6 +730,18 @@ class BlinkDetector:
     @property
     def camera_fps(self) -> float:
         return self._current_fps
+
+    @property
+    def current_brightness(self) -> float:
+        """Return average brightness of recent frames (0-1 scale)."""
+        with self._state_lock:
+            return self._current_brightness
+
+    @property
+    def adaptive_ear_threshold(self) -> float:
+        """Return current adaptive EAR threshold based on lighting."""
+        with self._state_lock:
+            return self._current_ear_threshold
 
 
 class NoOpBlinkDetector:

@@ -1,0 +1,33 @@
+{
+  "blink_threshold_seconds": 6,
+  "blink_rate_threshold_bpm": 14,
+  "monitor_interval_seconds": 1,
+  "alert_delay_minutes": 0.5,
+  "dim_delay_minutes": 5,
+  "subsequent_dim_cooldown_minutes": 20,
+  "ear_threshold": 0.23,
+  "consecutive_frame_count": 3,
+  "theme": {
+    "mode": "dark",
+    "accent_color": "blue"
+  },
+  "alert_enabled": true,
+  "alert_popup_enabled": true,
+  "escalation_delay_seconds": 30,
+  "notice_blink_rate_bpm": 12,
+  "warning_blink_rate_bpm": 10,
+  "critical_blink_rate_bpm": 8,
+  "alert_history_limit": 100,
+  "alert_message": "Please take a short break and blink slowly.",
+  "overlay_enabled": true,
+  "overlay_opacity": 0.35,
+  "log_level": "INFO",
+  "log_when": "midnight",
+  "log_backup_days": 30,
+  "window": {
+    "width": 960,
+    "height": 620,
+    "min_width": 800,
+    "min_height": 540
+  }
+}
