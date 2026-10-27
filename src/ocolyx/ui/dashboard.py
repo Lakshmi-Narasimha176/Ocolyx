@@ -524,6 +524,8 @@ class DashboardView(ctk.CTk):
     def set_session_log_entries(self, entries: list[dict[str, Any]]) -> None:
         if not self.is_alive():
             return
+        if self._session_log_entries == entries:
+            return
         self._session_log_entries = entries
         if self._current_view == "session_log":
             self.show_session_log_view()

@@ -184,7 +184,7 @@ class DashboardController:
             except Exception as exc:
                 self.logger.warning("Failed to refresh dashboard status: %s", exc)
 
-        if self.get_session_log:
+        if self.get_session_log and getattr(self.view, "_current_view", "") == "session_log":
             try:
                 self.update_session_log(self.get_session_log())
             except Exception as exc:

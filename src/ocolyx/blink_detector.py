@@ -132,11 +132,10 @@ class WebcamManager(threading.Thread):
         self.process_fps = max(1.0, float(process_fps))
         self.process_interval = 1.0 / self.process_fps
 
-        # Capture settings are intentionally fixed for stability on Windows 10.
-        # The processing thread can still downsample frames independently.
-        self.capture_width = 640
-        self.capture_height = 480
-        self.capture_fps = 30.0
+        # Capture settings optimized for low RAM and minimal camera driver buffer overhead
+        self.capture_width = 480
+        self.capture_height = 360
+        self.capture_fps = 15.0
 
         self.logger = logger or logging.getLogger("ocolyx.blink_detector.webcam")
         self.on_frame = on_frame
@@ -511,6 +510,8 @@ class BlinkDetector:
         try:
             self.face_detector = dlib.get_frontal_face_detector()
             self.shape_predictor = dlib.shape_predictor(str(self.predictor_path))
+            import gc
+            gc.collect()
             self.logger.info("Loaded dlib 68-point facial landmark predictor")
         except Exception as exc:
             self.logger.exception("Failed to initialize dlib predictor")
@@ -622,6 +623,7 @@ class BlinkDetector:
     def _run(self) -> None:
         last_frame_id = -1
         consecutive_no_face = 0
+        frame_counter = 0
         sleep_interval = max(0.015, self.process_interval / 2.0)
 
         while not self._stop_event.is_set():
@@ -645,6 +647,11 @@ class BlinkDetector:
                     continue
 
             try:
+                frame_counter += 1
+                if frame_counter % 300 == 0:
+                    import gc
+                    gc.collect(1)
+
                 has_face = self._process_frame(frame)
                 if not has_face:
                     consecutive_no_face += 1
