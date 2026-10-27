@@ -179,6 +179,12 @@ Verification:
         Remove-Item -LiteralPath $PackageZip -Force
     }
     Compress-Archive -Path (Join-Path $PackageDir "*") -DestinationPath $PackageZip -Force
+
+    # Clean intermediate build cache to save disk space
+    $buildDir = Join-Path $Root "build"
+    if (Test-Path $buildDir) {
+        Remove-Item -LiteralPath $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host ""

@@ -12,7 +12,7 @@ from typing import Optional
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_LOG_WHEN = "midnight"
-DEFAULT_LOG_BACKUP_COUNT = 30
+DEFAULT_LOG_BACKUP_COUNT = 3
 
 
 def _resolve_log_level(level: str) -> int:

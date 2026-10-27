@@ -52,6 +52,14 @@ excludes = [
     "doctest",
     "IPython",
     "matplotlib",
+    "scipy",
+    "notebook",
+    "pandas",
+    "sympy",
+    "torch",
+    "mediapipe",
+    "tensorboard",
+    "setuptools",
 ]
 
 a = Analysis(

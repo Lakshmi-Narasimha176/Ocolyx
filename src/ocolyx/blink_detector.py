@@ -58,6 +58,16 @@ def _estimate_brightness(frame: np.ndarray) -> float:
     return float(np.mean(gray) / 255.0)
 
 
+_CLAHE_INSTANCE: Optional[cv2.CLAHE] = None
+
+
+def _get_clahe() -> cv2.CLAHE:
+    global _CLAHE_INSTANCE
+    if _CLAHE_INSTANCE is None:
+        _CLAHE_INSTANCE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    return _CLAHE_INSTANCE
+
+
 def _preprocess_frame_for_detection(frame: np.ndarray, brightness: float) -> np.ndarray:
     """Apply adaptive preprocessing for robust detection in varying light conditions.
     
@@ -71,10 +81,8 @@ def _preprocess_frame_for_detection(frame: np.ndarray, brightness: float) -> np.
     # Convert to grayscale
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     
-    # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) for low-light enhancement
-    # CLAHE is superior to regular histogram equalization as it prevents over-amplification
-    # of noise in uniform regions
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    # Reuse persistent CLAHE instance to avoid per-frame allocations
+    clahe = _get_clahe()
     enhanced = clahe.apply(gray)
     
     # For very dark frames, apply additional contrast enhancement
@@ -142,6 +150,7 @@ class WebcamManager(threading.Thread):
         self._stop_event = threading.Event()
         self._frame_lock = threading.Lock()
         self._latest_frame: Optional[np.ndarray] = None
+        self._frame_id = 0
         self._connected = False
         self._last_read_time = time.time()
         self.fps = 0.0
@@ -212,6 +221,7 @@ class WebcamManager(threading.Thread):
 
                     with self._frame_lock:
                         self._latest_frame = frame.copy() if isinstance(frame, np.ndarray) else frame
+                        self._frame_id += 1
 
                     if self.on_frame:
                         try:
@@ -241,6 +251,12 @@ class WebcamManager(threading.Thread):
     def get_latest_frame(self) -> Optional[np.ndarray]:
         with self._frame_lock:
             return None if self._latest_frame is None else self._latest_frame.copy()
+
+    def get_latest_frame_with_id(self, since_frame_id: int = -1) -> Tuple[Optional[np.ndarray], int]:
+        with self._frame_lock:
+            if since_frame_id == self._frame_id or self._latest_frame is None:
+                return None, self._frame_id
+            return self._latest_frame.copy(), self._frame_id
 
     def is_connected(self) -> bool:
         return self._connected
@@ -456,6 +472,7 @@ class BlinkDetector:
         self.on_reconnect = on_reconnect
         self.on_error = on_error
         self.process_fps = float(process_fps) if process_fps and process_fps > 0 else 6.0
+        self.process_interval = 1.0 / self.process_fps if self.process_fps > 0 else 0.166
         self.source = source
 
         # Attempt to load the dlib predictor; allow callers to catch FileNotFoundError
@@ -474,6 +491,11 @@ class BlinkDetector:
         self._last_blink_time = 0.0
         self._blink_timestamps: Deque[float] = deque()
         self._current_fps = 0.0
+        
+        # Energy-saving face tracking cache
+        self._cached_face_rect: Optional[dlib.rectangle] = None
+        self._face_detect_counter = 0
+        self._face_detect_interval = 10  # Re-detect full face only every 10 frames (~1.5s)
         
         # Low-light detection and adaptation
         self._current_brightness = 0.5
@@ -598,26 +620,49 @@ class BlinkDetector:
         return self.monitoring_state == "running"
 
     def _run(self) -> None:
+        last_frame_id = -1
+        consecutive_no_face = 0
+        sleep_interval = max(0.015, self.process_interval / 2.0)
+
         while not self._stop_event.is_set():
             webcam_manager = self.webcam_manager
             if webcam_manager is None:
-                time.sleep(0.02)
+                time.sleep(0.05)
                 continue
 
-            frame = webcam_manager.get_latest_frame()
-            if frame is None:
-                time.sleep(0.02)
-                continue
+            # Efficient frame retrieval: only process when a brand new frame arrives
+            if hasattr(webcam_manager, "get_latest_frame_with_id"):
+                frame, frame_id = webcam_manager.get_latest_frame_with_id(last_frame_id)
+                if frame is None:
+                    # No new frame arrived; sleep and conserve battery/CPU
+                    time.sleep(sleep_interval)
+                    continue
+                last_frame_id = frame_id
+            else:
+                frame = webcam_manager.get_latest_frame()
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
 
             try:
-                self._process_frame(frame)
+                has_face = self._process_frame(frame)
+                if not has_face:
+                    consecutive_no_face += 1
+                else:
+                    consecutive_no_face = 0
+
+                # Adaptive battery saver: if user is not in front of camera (>15 frames),
+                # sleep longer (100ms) to conserve battery until they return
+                if consecutive_no_face > 15:
+                    time.sleep(0.1)
+                else:
+                    time.sleep(0.005)
             except Exception as exc:
                 self.logger.exception("Error during blink detection")
                 if self.on_error:
                     self.on_error(exc)
-            time.sleep(0.015)
 
-    def _process_frame(self, frame: np.ndarray) -> None:
+    def _process_frame(self, frame: np.ndarray) -> bool:
         # Estimate frame brightness for adaptive processing
         brightness = _estimate_brightness(frame)
         
@@ -638,16 +683,42 @@ class BlinkDetector:
         # Apply adaptive preprocessing for robust detection in varying light
         gray = _preprocess_frame_for_detection(frame, brightness)
         
-        # Detect faces in preprocessed frame
-        faces = self.face_detector(gray, 0)
-        if not faces:
-            with self._state_lock:
-                self.current_ear = 0.0
-            return
+        # Efficient face detection: reuse cached bounding box for 9 out of 10 frames
+        face = None
+        if (
+            self._cached_face_rect is not None
+            and self._face_detect_counter < self._face_detect_interval
+        ):
+            self._face_detect_counter += 1
+            face = self._cached_face_rect
+        else:
+            # Downscale frame by 0.5x for 4x faster HOG face detection
+            small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
+            small_faces = self.face_detector(small_gray, 0)
+            if small_faces:
+                sf = small_faces[0]
+                face = dlib.rectangle(
+                    int(sf.left() * 2),
+                    int(sf.top() * 2),
+                    int(sf.right() * 2),
+                    int(sf.bottom() * 2),
+                )
+                self._cached_face_rect = face
+                self._face_detect_counter = 0
+            else:
+                self._cached_face_rect = None
+                with self._state_lock:
+                    self.current_ear = 0.0
+                return False
 
-        face = faces[0]
         shape = self.shape_predictor(gray, face)
         landmarks = self._landmarks_to_np(shape)
+        if len(landmarks) < 68:
+            self._cached_face_rect = None
+            with self._state_lock:
+                self.current_ear = 0.0
+            return False
+
         left_eye = landmarks[LEFT_EYE_INDICES]
         right_eye = landmarks[RIGHT_EYE_INDICES]
 
@@ -663,12 +734,13 @@ class BlinkDetector:
 
         if ear < current_threshold:
             self._eye_closed_frames += 1
-            return
+            return True
 
         if self._eye_closed_frames >= self.consecutive_frames:
             self._register_blink(ear)
 
         self._eye_closed_frames = 0
+        return True
 
     def _register_blink(self, ear: float) -> None:
         timestamp = time.time()
