@@ -61,7 +61,9 @@
     systemStatusText: document.getElementById('system-status-text'),
     webcamVideo: document.getElementById('webcam-video'),
     overlayCanvas: document.getElementById('overlay-canvas'),
-    videoPlaceholder: document.getElementById('video-placeholder'),
+    cyberEyeCore: document.getElementById('cyber-eye-core'),
+    radarStatusTitle: document.getElementById('radar-status-title'),
+    radarStatusDesc: document.getElementById('radar-status-desc'),
     waveformCanvas: document.getElementById('waveform-canvas'),
     metricBpm: document.getElementById('metric-bpm'),
     metricBpmBadge: document.getElementById('metric-bpm-badge'),
@@ -173,6 +175,12 @@
 
     elements.metricBlinks.textContent = state.totalBlinks;
     updateBpmBadge();
+
+    // Visual ocular pulse on privacy radar
+    if (elements.cyberEyeCore) {
+      elements.cyberEyeCore.classList.add('blinking');
+      setTimeout(() => elements.cyberEyeCore.classList.remove('blinking'), 180);
+    }
   }
 
   function updateBpmBadge() {
@@ -512,7 +520,10 @@
       elements.webcamVideo.srcObject = stream;
       await elements.webcamVideo.play();
 
-      elements.videoPlaceholder.style.display = 'none';
+      if (elements.radarStatusTitle) {
+        elements.radarStatusTitle.textContent = 'Active Eye Tracking';
+        elements.radarStatusDesc.textContent = 'Camera is actively monitoring blinks in memory. Video is hidden from screen.';
+      }
 
       // Resize overlay canvas to match video
       elements.overlayCanvas.width = elements.webcamVideo.videoWidth || 640;
@@ -593,7 +604,10 @@
     }
 
     clearInterval(state.sessionTimerId);
-    elements.videoPlaceholder.style.display = 'flex';
+    if (elements.radarStatusTitle) {
+      elements.radarStatusTitle.textContent = 'System Standby';
+      elements.radarStatusDesc.textContent = 'Camera tracks blinks in local memory. Video is hidden from screen.';
+    }
 
     elements.btnToggleMonitor.innerHTML = `
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
