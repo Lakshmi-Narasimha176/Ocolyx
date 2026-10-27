@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ocolyx | Cyber-Eye Defense & Real-Time Blink Telemetry</title>
+  <meta name="description" content="Combat Computer Vision Syndrome and eye strain with real-time on-device blink rate telemetry and adaptive micro-break prompts in your web browser.">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- MediaPipe Face Mesh & Camera Utils via CDN for precise 468-point 3D facial landmark detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+  <!-- Screen Dimming Overlay for micro-break intervention -->
+  <div id="dim-overlay">
+    <div class="dim-prompt">
+      <h3>Take a Moment to Blink</h3>
+      <p>Your blink frequency dropped below healthy threshold. Softly close your eyes for 3 seconds.</p>
+    </div>
+  </div>
+
+  <!-- Guided 20-20-20 Micro-Exercise Modal -->
+  <div id="exercise-modal">
+    <div class="modal-content">
+      <h3 style="font-size: 1.4rem; color: #fff; font-weight: 700;">20-20-20 Blink Reset</h3>
+      <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 6px;">
+        Look at an object 20 feet away. Follow the breathing ring and blink slowly.
+      </p>
+      <div class="breathing-circle" id="exercise-countdown">20</div>
+      <p id="exercise-instruction" style="color: var(--cyan-primary); font-family: var(--font-mono); font-size: 0.95rem;">
+        Inhale deeply & look far away...
+      </p>
+      <button class="btn btn-secondary" id="btn-close-exercise" style="margin-top: 24px;">Close Exercise</button>
+    </div>
+  </div>
+
+  <div id="app-container">
+
+    <!-- Sidebar Navigation -->
+    <aside id="sidebar">
+      <div class="brand-section">
+        <img src="assets/Ocolyx.jpeg" alt="Ocolyx Logo" class="brand-logo">
+        <div class="brand-info">
+          <h1>OCOLYX</h1>
+          <span class="brand-badge">Cyber-Eye Defense</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="dashboard" id="nav-btn-dashboard">
+          <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+          Dashboard
+        </button>
+        <button class="nav-item" data-view="settings" id="nav-btn-settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+        <button class="nav-item" data-view="history" id="nav-btn-history">
+          <svg viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+          Session Log
+        </button>
+      </nav>
+
+      <div class="sidebar-status-box">
+        <div class="status-indicator-row">
+          <span class="status-dot" id="system-status-dot"></span>
+          <strong id="system-status-text" style="color: #fff;">System Idle</strong>
+        </div>
+        <p>100% on-device vision. Video frames never leave your computer.</p>
+        <a href="https://github.com/Lakshmi-Narasimha176/Ocolyx/releases/latest" target="_blank" class="desktop-app-cta" id="cta-desktop-download">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Get Windows App (.exe)
+        </a>
+      </div>
+    </aside>
+
+    <!-- Main Content Workspace -->
+    <main id="main-content">
+
+      <!-- View: Dashboard -->
+      <section class="view-section active" id="view-dashboard">
+        
+        <!-- Header Controls -->
+        <header class="top-header">
+          <div class="header-left">
+            <h2>Eye-Strain Defense Cockpit</h2>
+            <p>Real-time rolling blink rate & corneal strain intervention system</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-primary" id="btn-toggle-monitor">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span>Start Monitoring</span>
+            </button>
+            <button class="btn btn-secondary" id="btn-start-exercise">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              <span>20-20-20 Break</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Metric Stat Cards -->
+        <div class="metrics-grid">
+          
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Blink Frequency</span>
+              <svg class="metric-icon" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <div class="metric-value">
+              <span id="metric-bpm">0.0</span>
+              <span class="metric-unit">bpm</span>
+            </div>
+            <div class="metric-footer">
+              <span class="status-badge badge-neutral" id="metric-bpm-badge">Standby</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Eye Aspect Ratio</span>
+              <svg class="metric-icon" viewBox="0 0 24 24"><path d="M2 12h20M12 2v20"/></svg>
+            </div>
+            <div class="metric-value">
+              <span id="metric-ear">0.00</span>
+              <span class="metric-unit">EAR</span>
+            </div>
+            <div class="metric-footer">
+              <span class="status-badge badge-neutral" id="metric-ear-badge">Threshold: 0.21</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Total Blinks</span>
+              <svg class="metric-icon" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div class="metric-value">
+              <span id="metric-blinks">0</span>
+              <span class="metric-unit">blinks</span>
+            </div>
+            <div class="metric-footer">
+              <span style="color: var(--text-dim); font-size: 0.78rem;">Session cumulative</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Active Session</span>
+              <svg class="metric-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="metric-value">
+              <span id="metric-timer">00:00:00</span>
+            </div>
+            <div class="metric-footer">
+              <span class="status-badge badge-neutral" id="metric-session-badge">Stopped</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Strain Risk</span>
+              <svg class="metric-icon" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            </div>
+            <div class="metric-value">
+              <span id="metric-risk">Low</span>
+            </div>
+            <div class="metric-footer">
+              <span class="status-badge badge-healthy" id="metric-risk-badge">Optimal Health</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Cockpit Video and Telemetry Waveform -->
+        <div class="cockpit-grid">
+
+          <!-- Webcam Visualizer Stage -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan-primary)" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                <span>Live Vision Telemetry</span>
+              </div>
+              <span class="panel-badge" id="hud-fps">0 FPS</span>
+            </div>
+
+            <div class="video-stage">
+              <div class="video-placeholder" id="video-placeholder">
+                <svg viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                <h4>Camera Inactive</h4>
+                <p>Click "Start Monitoring" to enable private on-device vision tracking.</p>
+              </div>
+              <video id="webcam-video" playsinline muted></video>
+              <canvas id="overlay-canvas"></canvas>
+              <div class="video-hud">
+                <span id="hud-status">STANDBY</span>
+                <span id="hud-ear">EAR: --</span>
+              </div>
+            </div>
+
+            <div class="intervention-bar">
+              <div class="intervention-info">
+                <h4>Screen Dim Intervention</h4>
+                <p>Softly dims screen when blink frequency drops below health threshold.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="toggle-dim-feature" checked>
+                <span class="slider-toggle"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Real-Time EAR Waveform Stream -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan-primary)" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span>Dynamic EAR Waveform Stream</span>
+              </div>
+              <span class="panel-badge">60Hz Rolling Buffer</span>
+            </div>
+
+            <div class="waveform-container">
+              <canvas id="waveform-canvas"></canvas>
+              <div class="waveform-legend">
+                <div class="legend-item">
+                  <span class="legend-color" style="background: var(--cyan-primary);"></span>
+                  <span>Instantaneous EAR</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-color" style="background: var(--color-warning);"></span>
+                  <span>Blink Closure Threshold (0.21)</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-color" style="background: var(--color-healthy);"></span>
+                  <span>Optimal Baseline</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="background: var(--bg-card); border-radius: var(--border-radius-md); padding: 14px 18px; margin-top: 14px; border: 1px solid var(--border-glass);">
+              <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                <span style="color: var(--text-muted);">Eye Aspect Ratio Equation:</span>
+                <span style="font-family: var(--font-mono); color: var(--cyan-primary);">EAR = (||p2-p6|| + ||p3-p5||) / (2 * ||p1-p4||)</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- View: Settings -->
+      <section class="view-section" id="view-settings">
+        <header class="top-header">
+          <div class="header-left">
+            <h2>Telemetry & Alert Settings</h2>
+            <p>Customize detection sensitivity, break alerts, and ambient interventions</p>
+          </div>
+          <button class="btn btn-primary" id="btn-save-settings">Save Preferences</button>
+        </header>
+
+        <div class="settings-card">
+          <div class="settings-group">
+            
+            <div class="setting-row">
+              <div class="setting-info">
+                <h4>Blink Rate Threshold (BPM)</h4>
+                <p>Alert triggers when rolling blink frequency drops below this rate.</p>
+              </div>
+              <div class="setting-control">
+                <input type="range" min="3" max="15" step="1" value="5" class="slider-input" id="cfg-bpm">
+                <span class="setting-value-badge" id="cfg-bpm-val">5 bpm</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <h4>Eye Aspect Ratio (EAR) Threshold</h4>
+                <p>Geometric ratio below which eye landmark contours register as closed.</p>
+              </div>
+              <div class="setting-control">
+                <input type="range" min="0.15" max="0.30" step="0.01" value="0.21" class="slider-input" id="cfg-ear">
+                <span class="setting-value-badge" id="cfg-ear-val">0.21</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <h4>Audio Chime Interventions</h4>
+                <p>Play gentle synthesized chime alerts when sustained strain is detected.</p>
+              </div>
+              <div class="setting-control">
+                <label class="switch">
+                  <input type="checkbox" id="cfg-audio" checked>
+                  <span class="slider-toggle"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <h4>Ambient Screen Dimming</h4>
+                <p>Enable smooth click-through opacity overlay prompting rest.</p>
+              </div>
+              <div class="setting-control">
+                <label class="switch">
+                  <input type="checkbox" id="cfg-dim" checked>
+                  <span class="slider-toggle"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <h4>Desktop Notifications</h4>
+                <p>Send browser background alerts when working in another tab or application.</p>
+              </div>
+              <div class="setting-control">
+                <button class="btn btn-secondary" id="btn-request-notifications">Enable Notifications</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- View: Session Log -->
+      <section class="view-section" id="view-history">
+        <header class="top-header">
+          <div class="header-left">
+            <h2>Session Telemetry Log</h2>
+            <p>Chronological record of blink rate drops, break interventions, and strain alerts</p>
+          </div>
+          <button class="btn btn-secondary" id="btn-clear-logs">Clear History</button>
+        </header>
+
+        <div class="settings-card">
+          <div class="table-container">
+            <table class="log-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Event Type</th>
+                  <th>Blink Rate</th>
+                  <th>Status</th>
+                  <th>Intervention</th>
+                </tr>
+              </thead>
+              <tbody id="log-table-body">
+                <tr>
+                  <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 30px;">
+                    No session events recorded yet. Start monitoring to log eye telemetry.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
