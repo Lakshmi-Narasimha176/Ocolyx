@@ -32,18 +32,21 @@
 
 ---
 
-## ⚡ Quick Download
-
-Download the portable, single-file Windows release (no installation or Python setup needed):
+## 🌐 Launch Web App & Download
 
 <p align="center">
+  <a href="https://lakshmi-narasimha176.github.io/Ocolyx/">
+    <img src="https://img.shields.io/badge/Launch%20Live%20Web%20App-00F0FF?style=for-the-badge&logo=googlechrome&logoColor=black" alt="Launch Live Web App">
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://github.com/Lakshmi-Narasimha176/Ocolyx/releases/latest/download/Ocolyx-Windows.zip">
-    <img src="https://img.shields.io/badge/Download-Ocolyx--Windows.zip-00ADB5?style=for-the-badge&logo=windows&logoColor=white" alt="Download Ocolyx-Windows.zip">
+    <img src="https://img.shields.io/badge/Download%20Windows%20App%20(.exe)-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows App">
   </a>
 </p>
 
 > [!TIP]
-> **Zero configuration required**: The executable package bundles the OpenCV runtime, CustomTkinter assets, the 68-point facial landmark model, and default configurations into a single standalone app.
+> - **Web Version**: Run directly in your browser with zero installs at **[lakshmi-narasimha176.github.io/Ocolyx](https://lakshmi-narasimha176.github.io/Ocolyx/)**.
+> - **Desktop App**: Single-file portable `.exe` for Windows with background system tray integration and full desktop screen dimming.
 
 ---
 
