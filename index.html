@@ -177,24 +177,45 @@
         <!-- Cockpit Video and Telemetry Waveform -->
         <div class="cockpit-grid">
 
-          <!-- Webcam Visualizer Stage -->
+          <!-- Privacy Radar & Eye Telemetry Stage -->
           <div class="panel-card">
             <div class="panel-header">
               <div class="panel-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan-primary)" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                <span>Live Vision Telemetry</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan-primary)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span>Privacy Radar & Telemetry</span>
               </div>
               <span class="panel-badge" id="hud-fps">0 FPS</span>
             </div>
 
-            <div class="video-stage">
-              <div class="video-placeholder" id="video-placeholder">
-                <svg viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                <h4>Camera Inactive</h4>
-                <p>Click "Start Monitoring" to enable private on-device vision tracking.</p>
+            <div class="video-stage" id="vision-stage">
+              <!-- Video runs purely in background memory; NEVER rendered to display -->
+              <video id="webcam-video" playsinline muted autoplay></video>
+              <canvas id="overlay-canvas" style="display:none;"></canvas>
+
+              <!-- Cyber Privacy Shield Visualizer -->
+              <div class="privacy-radar-container" id="privacy-radar">
+                <div class="radar-rings">
+                  <div class="radar-ring ring-1"></div>
+                  <div class="radar-ring ring-2"></div>
+                  <div class="radar-ring ring-3"></div>
+                  <div class="radar-sweep"></div>
+                </div>
+                <div class="cyber-eye-core" id="cyber-eye-core">
+                  <svg viewBox="0 0 24 24" class="eye-svg" id="radar-eye-svg">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </div>
+                <div class="privacy-status-text">
+                  <span class="privacy-badge">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    100% PRIVATE • ZERO VIDEO DISPLAY
+                  </span>
+                  <h4 id="radar-status-title">System Standby</h4>
+                  <p id="radar-status-desc">Camera tracks blinks in local memory. Video is hidden from screen.</p>
+                </div>
               </div>
-              <video id="webcam-video" playsinline muted></video>
-              <canvas id="overlay-canvas"></canvas>
+
               <div class="video-hud">
                 <span id="hud-status">STANDBY</span>
                 <span id="hud-ear">EAR: --</span>

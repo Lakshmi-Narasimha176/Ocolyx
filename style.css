@@ -534,7 +534,7 @@ body::after {
   border: 1px solid var(--border-neon);
 }
 
-/* Video Stage */
+/* Privacy Radar Vision Stage */
 .video-stage {
   position: relative;
   width: 100%;
@@ -545,24 +545,24 @@ body::after {
   border: 1px solid var(--border-glass);
 }
 
+/* Video stream is kept alive in background memory for AI frame capture, but NEVER visible */
 #webcam-video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1); /* Mirror webcam */
-}
-
-#overlay-canvas {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  transform: scaleX(-1);
+  width: 640px;
+  height: 480px;
+  opacity: 0;
   pointer-events: none;
+  z-index: -10;
 }
 
-.video-placeholder {
+#overlay-canvas {
+  display: none;
+}
+
+/* Privacy Radar & Ocular Telemetry Display */
+.privacy-radar-container {
   position: absolute;
   top: 0;
   left: 0;
@@ -572,17 +572,123 @@ body::after {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle, #101624 0%, #080b12 100%);
-  color: var(--text-muted);
-  gap: 14px;
-  padding: 20px;
-  text-align: center;
+  background: radial-gradient(circle, #0e1628 0%, #060912 100%);
+  overflow: hidden;
+  z-index: 2;
 }
 
-.video-placeholder svg {
-  width: 52px;
-  height: 52px;
+.radar-rings {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.radar-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px dashed rgba(0, 240, 255, 0.2);
+}
+
+.ring-1 { width: 90px; height: 90px; border-style: solid; border-color: rgba(0, 240, 255, 0.35); }
+.ring-2 { width: 155px; height: 155px; animation: rotate-reverse 20s linear infinite; }
+.ring-3 { width: 220px; height: 220px; border-color: rgba(99, 102, 241, 0.25); animation: rotate-clock 25s linear infinite; }
+
+.radar-sweep {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 270deg, rgba(0, 240, 255, 0.25) 360deg);
+  animation: radar-sweep 4s linear infinite;
+}
+
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes rotate-clock {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes rotate-reverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+.cyber-eye-core {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(14, 23, 38, 0.95);
+  border: 2px solid var(--cyan-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 25px var(--cyan-glow);
+  z-index: 5;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cyber-eye-core.blinking {
+  transform: scale(0.8);
+  border-color: var(--color-warning);
+  box-shadow: 0 0 35px var(--color-warning-glow);
+}
+
+.eye-svg {
+  width: 32px;
+  height: 32px;
   stroke: var(--cyan-primary);
+  stroke-width: 2;
+  fill: none;
+  transition: stroke 0.18s ease;
+}
+
+.cyber-eye-core.blinking .eye-svg {
+  stroke: var(--color-warning);
+}
+
+.privacy-status-text {
+  position: relative;
+  z-index: 5;
+  text-align: center;
+  margin-top: 16px;
+  max-width: 82%;
+}
+
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--color-healthy);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  padding: 4px 10px;
+  border-radius: 20px;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.privacy-status-text h4 {
+  font-size: 1.05rem;
+  color: #fff;
+  font-weight: 700;
+}
+
+.privacy-status-text p {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 4px;
   stroke-width: 1.5;
   filter: drop-shadow(0 0 12px var(--cyan-glow));
 }
